@@ -14,6 +14,7 @@ class Namespace(dict):
     Abstract constants class
     Constants can be accessed via .attribute or [key] and can be iterated over.
     """
+
     def __init__(self, *args, **kwargs):
         d = {k: k for k in args}
         d.update(dict(kwargs.items()))
@@ -23,7 +24,7 @@ class Namespace(dict):
         return self[item]
 
 
-OWNER_CONST = Namespace("UNKNOWN_VAR", "UNKNOWN_MODULE")
+OWNER_CONST = Namespace("UNKNOWN_VAR", "UNKNOWN_MODULE", "UNKNOWN_INTERNAL_MODULE")
 GROUP_TYPE = Namespace("FILE", "CLASS", "NAMESPACE")
 
 
@@ -80,6 +81,10 @@ def _resolve_str_variable(variable, file_groups):
         for group in file_group.all_groups():
             if any(ot == variable.points_to for ot in group.import_tokens):
                 return group
+        # Internal match
+        for node in file_group.all_nodes():
+            if any((variable.points_to in ot) or (ot in variable.points_to) for ot in node.import_tokens):
+                return OWNER_CONST.UNKNOWN_INTERNAL_MODULE
     return OWNER_CONST.UNKNOWN_MODULE
 
 
@@ -150,6 +155,7 @@ class Variable():
     They may either point to a string or, once resolved, a Group/Node.
     Not all variables can be resolved
     """
+
     def __init__(self, token, points_to, line_number=None):
         """
         :param str token:
@@ -184,6 +190,7 @@ class Call():
         do_something()
 
     """
+
     def __init__(self, token, line_number=None, owner_token=None, definite_constructor=False):
         self.token = token
         self.owner_token = owner_token
@@ -280,7 +287,7 @@ class Node():
         return f"<Node token={self.token} parent={self.parent}>"
 
     def __lt__(self, other):
-            return self.name() < other.name()
+        return self.name() < other.name()
 
     def name(self):
         """
@@ -491,6 +498,7 @@ class Group():
     """
     Groups represent namespaces (classes and modules/files)
     """
+
     def __init__(self, token, group_type, display_type, import_tokens=None,
                  line_number=None, parent=None, inherits=None):
         self.token = token

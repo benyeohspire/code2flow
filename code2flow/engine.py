@@ -52,6 +52,7 @@ class LanguageParams():
     """
     Shallow structure to make storing language-specific parameters cleaner
     """
+
     def __init__(self, source_type='script', ruby_version='27'):
         self.source_type = source_type
         self.ruby_version = ruby_version
@@ -61,6 +62,7 @@ class SubsetParams():
     """
     Shallow structure to make storing subset-specific parameters cleaner.
     """
+
     def __init__(self, target_function, upstream_depth, downstream_depth):
         self.target_function = target_function
         self.upstream_depth = upstream_depth
@@ -93,7 +95,6 @@ class SubsetParams():
             raise AssertionError("--downstream-depth must be >= 0. Exclude argument for complete depth.")
 
         return SubsetParams(target_function, upstream_depth, downstream_depth)
-
 
 
 def _find_target_node(subset_params, all_nodes):
@@ -330,7 +331,7 @@ def get_sources_and_language(raw_source_paths, language):
     return sources, language
 
 
-def make_file_group(tree, filename, extension):
+def make_file_group(tree, filename, extension, project_root=None):
     """
     Given an AST for the entire file, generate a file group complete with
     subgroups, nodes, etc.
@@ -345,7 +346,19 @@ def make_file_group(tree, filename, extension):
 
     subgroup_trees, node_trees, body_trees = language.separate_namespaces(tree)
     group_type = GROUP_TYPE.FILE
-    token = os.path.split(filename)[-1].rsplit('.' + extension, 1)[0]
+    if project_root:
+        project_root_abs = os.path.normpath(os.path.abspath(project_root)) + os.sep
+        module_path, orig_filename = os.path.split(
+            os.path.abspath(filename).split(project_root_abs)[-1])
+        if len(module_path) > 0:
+            resolve_path_name = module_path.replace(
+                os.sep, ".") + "." + orig_filename.split(".py")[0]
+        else:
+            resolve_path_name = orig_filename.split(".py")[0]
+        # print(filename, project_root_abs, module_path, orig_filename, resolve_path_name)
+        token = resolve_path_name
+    else:
+        token = os.path.split(filename)[-1].rsplit('.' + extension, 1)[0]
     line_number = 0
     display_name = 'File'
     import_tokens = language.file_import_tokens(filename)
@@ -383,7 +396,11 @@ def _find_link_for_call(call, node_a, all_nodes):
         if var_match:
             # Unknown modules (e.g. third party) we don't want to match)
             if var_match == OWNER_CONST.UNKNOWN_MODULE:
+                # if "format_" in call.token:
+                #     assert False
                 return None, None
+            elif var_match == OWNER_CONST.UNKNOWN_INTERNAL_MODULE:
+                break
             assert isinstance(var_match, Node)
             return var_match, None
 
@@ -393,7 +410,10 @@ def _find_link_for_call(call, node_a, all_nodes):
             # checking node.parent != node_a.file_group() prevents self linkage in cases like
             # function a() {b = Obj(); b.a()}
             if call.token == node.token and node.parent != node_a.file_group():
-                possible_nodes.append(node)
+                # if "format_" in call.token:
+                #     assert False
+                if (var_match != OWNER_CONST.UNKNOWN_INTERNAL_MODULE) or (call.owner_token in node.parent.token):
+                    possible_nodes.append(node)
     else:
         for node in all_nodes:
             if call.token == node.token \
@@ -429,7 +449,7 @@ def _find_links(node_a, all_nodes):
     return list(filter(None, links))
 
 
-def map_it(sources, extension, no_trimming, exclude_namespaces, exclude_functions,
+def map_it(sources, extension, project_roots, no_trimming, exclude_namespaces, exclude_functions,
            include_only_namespaces, include_only_functions,
            skip_parse_errors, lang_params):
     '''
@@ -474,8 +494,9 @@ def map_it(sources, extension, no_trimming, exclude_namespaces, exclude_function
 
     # 2. Find all groups (classes/modules) and nodes (functions) (a lot happens here)
     file_groups = []
-    for source, file_ast_tree in file_ast_trees:
-        file_group = make_file_group(file_ast_tree, source, extension)
+    for i, (source, file_ast_tree) in enumerate(file_ast_trees):
+        file_group = make_file_group(file_ast_tree, source, extension,
+                                     project_roots[i] if i < len(project_roots) else None)
         file_groups.append(file_group)
 
     # 3. Trim namespaces / functions to exactly what we want
@@ -606,7 +627,7 @@ def _limit_namespaces(file_groups, exclude_namespaces, include_only_namespaces):
     for namespace in exclude_namespaces:
         if namespace not in removed_namespaces:
             logging.warning(f"Could not exclude namespace '{namespace}' "
-                             "because it was not found.")
+                            "because it was not found.")
     return file_groups
 
 
@@ -632,7 +653,7 @@ def _limit_functions(file_groups, exclude_functions, include_only_functions):
     for function_name in exclude_functions:
         if function_name not in removed_functions:
             logging.warning(f"Could not exclude function '{function_name}' "
-                             "because it was not found.")
+                            "because it was not found.")
     return file_groups
 
 
@@ -668,7 +689,7 @@ def _generate_final_img(output_file, extension, final_img_filename, num_edges):
                  final_img_filename)
 
 
-def code2flow(raw_source_paths, output_file, language=None, hide_legend=True,
+def code2flow(raw_source_paths, output_file, project_roots=[], language=None, hide_legend=True,
               exclude_namespaces=None, exclude_functions=None,
               include_only_namespaces=None, include_only_functions=None,
               no_grouping=False, no_trimming=False, skip_parse_errors=False,
@@ -716,8 +737,8 @@ def code2flow(raw_source_paths, output_file, language=None, hide_legend=True,
     if isinstance(output_file, str):
         assert '.' in output_file, "Output filename must end in one of: %r." % set(VALID_EXTENSIONS)
         output_ext = output_file.rsplit('.', 1)[1] or ''
-        assert output_ext in VALID_EXTENSIONS, "Output filename must end in one of: %r." % \
-                                               set(VALID_EXTENSIONS)
+        assert output_ext in VALID_EXTENSIONS, "Output filename must end in one of: %r." % set(
+            VALID_EXTENSIONS)
 
     final_img_filename = None
     if output_ext and output_ext in IMAGE_EXTENSIONS:
@@ -731,7 +752,7 @@ def code2flow(raw_source_paths, output_file, language=None, hide_legend=True,
         output_file, extension = output_file.rsplit('.', 1)
         output_file += '.gv'
 
-    file_groups, all_nodes, edges = map_it(sources, language, no_trimming,
+    file_groups, all_nodes, edges = map_it(sources, language, project_roots, no_trimming,
                                            exclude_namespaces, exclude_functions,
                                            include_only_namespaces, include_only_functions,
                                            skip_parse_errors, lang_params)
