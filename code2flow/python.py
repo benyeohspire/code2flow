@@ -5,6 +5,8 @@ import os
 from .model import (OWNER_CONST, GROUP_TYPE, Group, Node, Call, Variable,
                     BaseLanguage, djoin)
 
+logger = logging.getLogger(__name__)
+
 
 def get_call_from_func_element(func):
     """
@@ -15,7 +17,10 @@ def get_call_from_func_element(func):
     :param func ast:
     :rtype: Call|None
     """
-    assert type(func) in (ast.Attribute, ast.Name, ast.Subscript, ast.Call)
+    if type(func) not in (ast.Attribute, ast.Name, ast.Subscript, ast.Call):
+        print("Warning: Function call object %s not valid." % str(func))
+        return None
+
     if type(func) == ast.Attribute:
         owner_token = []
         val = func.value
@@ -260,8 +265,8 @@ class Python(BaseLanguage):
             class_group.add_node(Python.make_nodes(node_tree, parent=class_group)[0])
 
         for subgroup_tree in subgroup_trees:
-            logging.warning("Code2flow does not support nested classes. Skipping %r in %r.",
-                            subgroup_tree.name, parent.token)
+            logger.warning("Code2flow does not support nested classes. Skipping %r in %r.",
+                           subgroup_tree.name, parent.token)
         return class_group
 
     @staticmethod

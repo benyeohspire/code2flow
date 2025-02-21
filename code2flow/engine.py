@@ -47,6 +47,8 @@ LANGUAGES = {
     'php': PHP,
 }
 
+logger = logging.getLogger(__name__)
+
 
 class LanguageParams():
     """
@@ -277,7 +279,7 @@ def determine_language(individual_files):
     for source, _ in individual_files:
         suffix = source.rsplit('.', 1)[-1]
         if suffix in LANGUAGES:
-            logging.info("Implicitly detected language as %r.", suffix)
+            logger.info("Implicitly detected language as %r.", suffix)
             return suffix
     raise AssertionError(f"Language could not be detected from input {individual_files}. ",
                          "Try explicitly passing the language flag.")
@@ -305,7 +307,7 @@ def get_sources_and_language(raw_source_paths, language):
 
     if not individual_files:
         raise AssertionError("No source files found from %r" % raw_source_paths)
-    logging.info("Found %d files from sources argument.", len(individual_files))
+    logger.info("Found %d files from sources argument.", len(individual_files))
 
     if not language:
         language = determine_language(individual_files)
@@ -315,18 +317,18 @@ def get_sources_and_language(raw_source_paths, language):
         if explicity_added or source.endswith('.' + language):
             sources.add(source)
         else:
-            logging.info("Skipping %r which is not a %s file. "
-                         "If this is incorrect, include it explicitly.",
-                         source, language)
+            logger.info("Skipping %r which is not a %s file. "
+                        "If this is incorrect, include it explicitly.",
+                        source, language)
 
     if not sources:
         raise AssertionError("Could not find any source files given {raw_source_paths} "
                              "and language {language}.")
 
     sources = sorted(list(sources))
-    logging.info("Processing %d source file(s)." % (len(sources)))
+    logger.info("Processing %d source file(s)." % (len(sources)))
     for source in sources:
-        logging.info("  " + source)
+        logger.info("  " + source)
 
     return sources, language
 
@@ -396,8 +398,6 @@ def _find_link_for_call(call, node_a, all_nodes):
         if var_match:
             # Unknown modules (e.g. third party) we don't want to match)
             if var_match == OWNER_CONST.UNKNOWN_MODULE:
-                # if "format_" in call.token:
-                #     assert False
                 return None, None
             elif var_match == OWNER_CONST.UNKNOWN_INTERNAL_MODULE:
                 break
@@ -426,7 +426,16 @@ def _find_link_for_call(call, node_a, all_nodes):
     if len(possible_nodes) == 1:
         return possible_nodes[0], None
     if len(possible_nodes) > 1:
-        return None, call
+        # return None, call
+        filtered_nodes = []
+        for node in possible_nodes:
+            if node.parent.group_type == GROUP_TYPE.CLASS and node.parent.parent.group_type == GROUP_TYPE.FILE:
+                if call.owner_token is not None and (call.owner_token in node.parent.parent.token):
+                    filtered_nodes.append(node)
+        if len(filtered_nodes) > 0:
+            return filtered_nodes, None
+        else:
+            return None, call
     return None, None
 
 
@@ -488,7 +497,7 @@ def map_it(sources, extension, project_roots, no_trimming, exclude_namespaces, e
             file_ast_trees.append((source, language.get_tree(source, lang_params)))
         except Exception as ex:
             if skip_parse_errors:
-                logging.warning("Could not parse %r. (%r) Skipping...", source, ex)
+                logger.warning("Could not parse %r. (%r) Skipping...", source, ex)
             else:
                 raise ex
 
@@ -512,8 +521,8 @@ def map_it(sources, extension, project_roots, no_trimming, exclude_namespaces, e
     nodes_by_subgroup_token = collections.defaultdict(list)
     for subgroup in all_subgroups:
         if subgroup.token in nodes_by_subgroup_token:
-            logging.warning("Duplicate group name %r. Naming collision possible.",
-                            subgroup.token)
+            logger.warning("Duplicate group name %r. Naming collision possible.",
+                           subgroup.token)
         nodes_by_subgroup_token[subgroup.token] += subgroup.nodes
 
     for group in file_groups:
@@ -529,24 +538,28 @@ def map_it(sources, extension, project_roots, no_trimming, exclude_namespaces, e
         node.resolve_variables(file_groups)
 
     # Not a step. Just log what we know so far
-    logging.info("Found groups %r." % [g.label() for g in all_subgroups])
-    logging.info("Found nodes %r." % sorted(n.token_with_ownership() for n in all_nodes))
-    logging.info("Found calls %r." % sorted(list(set(c.to_string() for c in
-                                                     flatten(n.calls for n in all_nodes)))))
-    logging.info("Found variables %r." % sorted(list(set(v.to_string() for v in
-                                                         flatten(n.variables for n in all_nodes)))))
+    logger.info("Found groups %r." % [g.label() for g in all_subgroups])
+    logger.info("Found nodes %r." % sorted(n.token_with_ownership() for n in all_nodes))
+    logger.info("Found calls %r." % sorted(list(set(c.to_string() for c in
+                                                    flatten(n.calls for n in all_nodes)))))
+    logger.info("Found variables %r." % sorted(list(set(v.to_string() for v in
+                                                        flatten(n.variables for n in all_nodes)))))
 
     # 6. Find all calls between all nodes
     bad_calls = []
     edges = []
     for node_a in list(all_nodes):
         links = _find_links(node_a, all_nodes)
-        for node_b, bad_call in links:
+        for node_bs, bad_call in links:
             if bad_call:
                 bad_calls.append(bad_call)
-            if not node_b:
+            if not node_bs:
                 continue
-            edges.append(Edge(node_a, node_b))
+            if isinstance(node_bs, list):
+                for node_b in node_bs:
+                    edges.append(Edge(node_a, node_b))
+            else:
+                edges.append(Edge(node_a, node_bs))
 
     # 7. Loudly complain about duplicate edges that were skipped
     bad_calls_strings = set()
@@ -554,8 +567,8 @@ def map_it(sources, extension, project_roots, no_trimming, exclude_namespaces, e
         bad_calls_strings.add(bad_call.to_string())
     bad_calls_strings = list(sorted(list(bad_calls_strings)))
     if bad_calls_strings:
-        logging.info("Skipped processing these calls because the algorithm "
-                     "linked them to multiple function definitions: %r." % bad_calls_strings)
+        logger.info("Skipped processing these calls because the algorithm "
+                    "linked them to multiple function definitions: %r." % bad_calls_strings)
 
     if no_trimming:
         return file_groups, all_nodes, edges
@@ -579,12 +592,12 @@ def map_it(sources, extension, project_roots, no_trimming, exclude_namespaces, e
     all_nodes = list(nodes_with_edges)
 
     if not all_nodes:
-        logging.warning("No functions found! Most likely, your file(s) do not have "
-                        "functions that call each other. Note that to generate a flowchart, "
-                        "you need to have both the function calls and the function "
-                        "definitions. Or, you might be excluding too many "
-                        "with --exclude-* / --include-* / --target-function arguments. ")
-        logging.warning("Code2flow will generate an empty output file.")
+        logger.warning("No functions found! Most likely, your file(s) do not have "
+                       "functions that call each other. Note that to generate a flowchart, "
+                       "you need to have both the function calls and the function "
+                       "definitions. Or, you might be excluding too many "
+                       "with --exclude-* / --include-* / --target-function arguments. ")
+        logger.warning("Code2flow will generate an empty output file.")
 
     return file_groups, all_nodes, edges
 
@@ -626,8 +639,8 @@ def _limit_namespaces(file_groups, exclude_namespaces, include_only_namespaces):
 
     for namespace in exclude_namespaces:
         if namespace not in removed_namespaces:
-            logging.warning(f"Could not exclude namespace '{namespace}' "
-                            "because it was not found.")
+            logger.warning(f"Could not exclude namespace '{namespace}' "
+                           "because it was not found.")
     return file_groups
 
 
@@ -652,8 +665,8 @@ def _limit_functions(file_groups, exclude_functions, include_only_functions):
 
     for function_name in exclude_functions:
         if function_name not in removed_functions:
-            logging.warning(f"Could not exclude function '{function_name}' "
-                            "because it was not found.")
+            logger.warning(f"Could not exclude function '{function_name}' "
+                           "because it was not found.")
     return file_groups
 
 
@@ -665,15 +678,15 @@ def _generate_graphviz(output_file, extension, final_img_filename):
     :param str final_img_filename:
     """
     start_time = time.time()
-    logging.info("Running graphviz to make the image...")
+    logger.info("Running graphviz to make the image...")
     command = ["dot", "-T" + extension, output_file]
     with open(final_img_filename, 'w') as f:
         try:
             subprocess.run(command, stdout=f, check=True)
-            logging.info("Graphviz finished in %.2f seconds." % (time.time() - start_time))
+            logger.info("Graphviz finished in %.2f seconds." % (time.time() - start_time))
         except subprocess.CalledProcessError:
-            logging.warning("*** Graphviz returned non-zero exit code! "
-                            "Try running %r for more detail ***", ' '.join(command + ['-v', '-O']))
+            logger.warning("*** Graphviz returned non-zero exit code! "
+                           "Try running %r for more detail ***", ' '.join(command + ['-v', '-O']))
 
 
 def _generate_final_img(output_file, extension, final_img_filename, num_edges):
@@ -685,8 +698,8 @@ def _generate_final_img(output_file, extension, final_img_filename, num_edges):
     :param int num_edges:
     """
     _generate_graphviz(output_file, extension, final_img_filename)
-    logging.info("Completed your flowchart! To see it, open %r.",
-                 final_img_filename)
+    logger.info("Completed your flowchart! To see it, open %r.",
+                final_img_filename)
 
 
 def code2flow(raw_source_paths, output_file, project_roots=[], language=None, hide_legend=True,
@@ -729,7 +742,7 @@ def code2flow(raw_source_paths, output_file, project_roots=[], language=None, hi
     include_only_functions = include_only_functions or []
     assert isinstance(include_only_functions, list)
 
-    logging.basicConfig(format="Code2Flow: %(message)s", level=level)
+    # logging.basicConfig(format="Code2Flow: %(message)s", level=level)
 
     sources, language = get_sources_and_language(raw_source_paths, language)
 
@@ -758,14 +771,14 @@ def code2flow(raw_source_paths, output_file, project_roots=[], language=None, hi
                                            skip_parse_errors, lang_params)
 
     if subset_params:
-        logging.info("Filtering into subset...")
+        logger.info("Filtering into subset...")
         file_groups, all_nodes, edges = _filter_for_subset(subset_params, all_nodes, edges, file_groups)
 
     file_groups.sort()
     all_nodes.sort()
     edges.sort()
 
-    logging.info("Generating output file...")
+    logger.info("Generating output file...")
 
     if isinstance(output_file, str):
         with open(output_file, 'w') as fh:
@@ -778,11 +791,11 @@ def code2flow(raw_source_paths, output_file, project_roots=[], language=None, hi
                    groups=file_groups, hide_legend=hide_legend,
                    no_grouping=no_grouping)
 
-    logging.info("Wrote output file %r with %d nodes and %d edges.",
-                 output_file, len(all_nodes), len(edges))
+    logger.info("Wrote output file %r with %d nodes and %d edges.",
+                output_file, len(all_nodes), len(edges))
     if not output_ext == 'json':
-        logging.info("For better machine readability, you can also try outputting in a json format.")
-    logging.info("Code2flow finished processing in %.2f seconds." % (time.time() - start_time))
+        logger.info("For better machine readability, you can also try outputting in a json format.")
+    logger.info("Code2flow finished processing in %.2f seconds." % (time.time() - start_time))
 
     # translate to an image if that was requested
     if final_img_filename:

@@ -6,6 +6,8 @@ import subprocess
 from .model import (Group, Node, Call, Variable, BaseLanguage,
                     OWNER_CONST, GROUP_TYPE, is_installed, djoin, flatten)
 
+logger = logging.getLogger(__name__),
+
 
 def lineno(el):
     """
@@ -252,10 +254,10 @@ class Javascript(BaseLanguage):
                                       "from npm and try again."
         version = get_acorn_version()
         if not version.startswith('8.'):
-            logging.warning("Acorn is required to parse javascript files. "
-                            "Version %r was found but code2flow has only been "
-                            "tested on 8.*", version)
-        logging.info("Using Acorn %s" % version)
+            logger.warning("Acorn is required to parse javascript files. "
+                           "Version %r was found but code2flow has only been "
+                           "tested on 8.*", version)
+        logger.info("Using Acorn %s" % version)
 
     @staticmethod
     def get_tree(filename, lang_params):
@@ -347,7 +349,7 @@ class Javascript(BaseLanguage):
             # It's unusual but should probably be handled in the future.
             # Handling this use case would require some code reorganziation.
             # Take a look at class_in_function.js to better understand.
-            logging.warning("Skipping class defined within a function!")
+            logger.warning("Skipping class defined within a function!")
 
         line_number = lineno(tree)
         calls = make_calls(this_scope_body)
